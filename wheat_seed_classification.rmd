@@ -1,0 +1,195 @@
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+out.width = "75%"
+```
+
+Loading the dataset containing wheat seed measurements.
+
+```{r seeds}
+seeds<-read.csv("seeds.csv")
+```
+
+## Data Validation
+
+```{r clean, echo=FALSE}
+# Verify that the dataset does not contain missing values.
+print(colSums(is.na(seeds)))
+print(any(is.null(seeds)))
+
+# Check whether the dataset contains negative or invalid numeric values.
+print(sum(rowMeans(seeds < 0), na.rm = TRUE))
+# Check for duplicated observations in the dataset.
+print(dim(unique(seeds))[1])
+
+```
+The dataset contains no missing values in any of the variables and includes 210 complete cases.
+In addition, no invalid or spurious values were identified in the dataset.
+No negative values were detected across the variables.
+The dataset also contains no duplicated records.
+
+The following section provides an overview of the dataset structure and feature distribution.
+```{r print, echo=FALSE}
+str(seeds)
+summary(seeds)
+
+```
+The dataset consists of 199 wheat grain samples belonging to three different varieties.
+Seven quantitative variables related to the internal kernel structure, extracted using a soft X-ray imaging technique, are included in the dataset.
+The target variable represents the wheat variety, while the remaining features describe area, perimeter, compactness, kernel length, kernel width, asymmetry coefficient, and kernel groove length.
+```{r visualiz_data,echo=FALSE}
+library(corrplot)
+## corrplot 0.92 loaded
+M = cor(seeds)
+corrplot(M, method = 'number') # colorful number
+# Perform PCA on the dataset.
+prcomp_seeds <- prcomp(seeds[, 1:7])
+pca_seeds <- data.frame(
+  PC1 = prcomp_seeds$x[, 1],
+  PC2 = prcomp_seeds$x[, 2],
+  classification = seeds$Type
+)
+# Load visualization library for PCA projection.
+library(ggplot2)
+ggplot(pca_seeds, aes(x = PC1, y = PC2, col = classification)) +
+  geom_point()
+```
+As shown in the correlation matrix, there is a very strong correlation of 0.99 between area and perimeter.
+A moderate correlation of 0.61 can be observed between area and compactness, while the lowest correlation appears between perimeter and compactness with a value of 0.53.
+Additional noticeable relationships include the correlations between area and kernel length, as well as between perimeter and kernel length.
+These observations suggest that grain size related attributes have a meaningful influence on the dataset structure.
+
+In this section, Min-Max normalization is applied to scale the feature values into a range between 0 and 1.
+
+```{r normilize,echo=FALSE}
+normalize <- function(x) {
+return ((x - min(x)) / (max(x) - min(x)))
+}
+
+n_data <- as.data.frame(lapply(seeds[1:8], normalize))
+
+
+summary(n_data)
+```
+he normalization process transforms all feature values into a consistent scale ranging from 0 to 1.
+
+The resulting train_sample object contains 160 randomly selected observations.
+```{r train_test_sets,echo=FALSE}
+set.seed(1234)
+shuffled_data= seeds[sample(1:nrow(seeds)), ]
+
+
+train_sample <- sample(199, 160)
+
+# Split the dataset into training and testing subsets.
+data_train <- shuffled_data[train_sample, ]
+data_test <- shuffled_data[-train_sample, ]
+
+# Extract labels for each subset.
+data_train_labals <- shuffled_data[train_sample, 8]
+data_test_labals <- shuffled_data[-train_sample, 8]
+
+# Verify class distribution across the subsets.
+prop.table(table(data_train$Type))
+prop.table(table(data_test$Type))
+```
+The dataset split preserves approximately 30% defaulted loans representation across both subsets.
+
+The following section presents the implementation and evaluation of the classification models used in this project.
+
+## K-Nearest Neighbors (KNN)
+The KNN algorithm was evaluated using three different values of `k`: 3, 5, and 7.
+```{r knn,echo=FALSE}
+library(class) 
+library(gmodels)
+# Apply the KNN algorithm using different k values.
+seeds_test_pred_k5 <- knn(train = data_train, test = data_test, cl = data_train_labals, k=5)
+seeds_test_pred_k3 <- knn(train = data_train, test = data_test, cl = data_train_labals, k=3)
+seeds_test_pred_k7 <- knn(train = data_train, test = data_test, cl = data_train_labals, k=7)
+
+ACC.5 <- 100 * sum(data_test_labals == seeds_test_pred_k5)/NROW(data_test_labals) # For knn = 5
+ACC.3 <- 100 * sum(data_test_labals == seeds_test_pred_k3)/NROW(data_test_labals)  # For knn = 3
+ACC.7 <- 100 * sum(data_test_labals == seeds_test_pred_k7)/NROW(data_test_labals)  # For knn = 7
+paste("Accuracy for k = 3",ACC.3,sep=" : ")
+paste("Accuracy for k = 5",ACC.5,sep=" : ")
+paste("Accuracy for k = 7",ACC.7,sep=" : ")
+```
+
+Among the evaluated configurations, the KNN model with k = 3 achieved the highest accuracy.
+
+```{r knn_visoualize,echo=FALSE}
+# Display the prediction confusion matrix
+CrossTable(x = data_test_labals, y = seeds_test_pred_k3, prop.chisq=FALSE)
+# Visualize KNN predictions using PCA projection.
+prcomp_seeds <- prcomp(data_test)
+pca_seeds <- data.frame(
+  PC1 = prcomp_seeds$x[, 1],
+  PC2 = prcomp_seeds$x[, 2],
+  classification = seeds_test_pred_k3
+)
+# Load visualization library for PCA plotting.
+ggplot(pca_seeds, aes(x = PC1, y = PC2, col = classification)) +
+  geom_point() + # Show dots
+  geom_text(
+    label= (data_test_labals == seeds_test_pred_k3), 
+    nudge_x = 0.25, nudge_y = 0.25, 
+    check_overlap = T
+  )
+```
+
+## Decision Tree Model
+The following section presents the implementation of a decision tree classifier using the C5.0 algorithm.
+
+```{r dection_tree,echo=FALSE}
+library(C50)
+
+vars <- c("Area", "Perimeter","Compactness","Kernel.Length","Kernel.Width","Asymmetry.Coeff","Kernel.Groove")
+seeds_tree_model <- C5.0(x=data_train[vars],y=as.factor(data_train$Type),trials = 3)
+summary(seeds_tree_model)
+plot(seeds_tree_model)
+```
+The trained decision tree model is evaluated on the test dataset.
+
+```{r test_tree,echo=FALSE}
+# Apply the trained model on the test dataset.
+seeds_pred <- predict(seeds_tree_model, data_test)
+CrossTable(data_test_labals, seeds_pred, prop.chisq = FALSE, prop.c = FALSE, prop.r = FALSE, dnn = c('actual Type', 'predicted Type'))
+
+plot(seeds_pred)
+
+
+ACC.withoutCost <- 100 * sum(data_test_labals == seeds_pred)/NROW(data_test_labals)
+
+paste("Accuracy for DT without cost metrix",ACC.withoutCost,sep=" : ")
+
+```
+## Decision Tree with Cost Matrix
+A cost matrix was introduced in order to penalize specific classification errors differently.
+```{r cost,echo=FALSE}
+matrix_dimensions <- list(c("1", "2", "3"), c("1", "2", "3"))
+names(matrix_dimensions) <- c('actual Type', 'predicted Type')
+
+error_cost <- matrix(c(0, 8, 10, 8, 0, 1, 1, 10, 0), nrow = 3, dimnames = matrix_dimensions)
+error_cost
+# Train the model using the cost matrix.
+seeds_cost <- C5.0(data_train[vars], as.factor(data_train$Type), costs = error_cost)
+plot(seeds_cost)
+# Generate predictions on the test dataset.
+seeds_cost_pred <- predict(seeds_cost, data_test)
+
+CrossTable(as.factor(data_test$Type), seeds_cost_pred, prop.chisq = FALSE, prop.c = FALSE, prop.r = FALSE, dnn = c('actual Type', 'predicted Type'))
+
+ACC.withoutCost <- 100 * sum(data_test_labals == seeds_pred)/NROW(data_test_labals)
+ACC.cost <- 100 * sum(data_test_labals == seeds_cost_pred)/NROW(data_test_labals)
+
+paste("Accuracy for DT without cost metrix",ACC.withoutCost,sep=" : ")
+paste("Accuracy for DT with cost metrix",ACC.cost,sep=" : ")
+
+```
+
+The cost matrix configuration did not improve the model performance, as the overall accuracy remained unchanged.
+
+The experimental results show that the KNN classifier achieved the strongest performance, reaching 100% prediction accuracy on the test dataset.
+In comparison, the decision tree model achieved an accuracy of approximately 87%.
+
+One possible explanation is the relatively small dataset size, where a limited number of misclassified samples has a substantial impact on the overall accuracy.
+
