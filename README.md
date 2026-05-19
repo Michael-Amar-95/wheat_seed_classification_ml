@@ -46,9 +46,7 @@ No data quality issues were detected.
 
 Min-Max normalization was applied to scale all features into the range [0,1]:
 
-\[
-x' = \frac{x - min(x)}{max(x) - min(x)}
-\]
+x' = (x - min(x)) / (max(x) - min(x))
 
 This ensures fair comparison between features with different scales.
 
